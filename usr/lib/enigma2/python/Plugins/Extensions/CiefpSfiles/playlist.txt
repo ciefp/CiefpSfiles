@@ -1,0 +1,11 @@
+# CiefpStalkerFiles portal list
+#
+# Structured format (one block per portal identity):
+# Host:http://portal.example:8080
+# Mac:00:1A:79:12:34:56
+# Alias:Living room
+# Device_Password:optional
+#
+# EStalker-compatible compact format is also supported:
+# http://portal.example:8080
+# 00:1A:79:12:34:56 # Living room
