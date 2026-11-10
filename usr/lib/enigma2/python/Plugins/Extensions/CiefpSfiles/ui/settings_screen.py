@@ -27,7 +27,7 @@ class SettingsScreen(Screen):
                     itemHeight="45" font="Regular;26" backgroundColor="#011a2e"/>
             <widget name="status" position="50,800" size="1300,40" font="Regular;26"
                     foregroundColor="#00FF00" backgroundColor="#011a2e"/>
-            <widget name="background" position="800,0" size="500,800" pixmap="%s" alphatest="on"/>
+            <widget name="background" position="800,50" size="600,900" pixmap="%s" alphatest="on"/>
             <ePixmap pixmap="buttons/red.png" position="50,880" size="35,35" alphatest="blend"/>
             <eLabel text="Cancel" position="100,870" size="200,50" font="Regular;28"
                     foregroundColor="white" backgroundColor="#800000" halign="center" valign="center"/>
