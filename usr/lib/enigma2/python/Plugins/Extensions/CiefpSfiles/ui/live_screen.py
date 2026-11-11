@@ -41,7 +41,7 @@ def _get_icon_path(icon_name):
 
 class LiveScreen(Screen):
     skin = """
-        <screen name="CiefpStalkerFilesLive" position="0,0" size="1920,1080"
+        <screen name="CiefpSfilesLive" position="0,0" size="1920,1080"
                 flags="wfNoBorder" backgroundColor="#011a2e">
 
             <!-- NASLOV -->
@@ -145,7 +145,7 @@ class LiveScreen(Screen):
         self._epg_timer = None
         
         # Widgets
-        self["title"] = Label(f"..:: CiefpStalkerFiles Live - {portal.get('name', '')} ::..")
+        self["title"] = Label(f"..:: CiefpSfiles Live - {portal.get('name', '')} ::..")
         self["info_icon"] = Pixmap()
         self["left_list"] = MenuList([], enableWrapAround=True, content=eListboxPythonMultiContent)
         self["left_list"].l.setItemHeight(50)
@@ -314,7 +314,7 @@ class LiveScreen(Screen):
         self["epg_next_desc"].setText("")
 
     def _fetch_epg_async(self, stream_id):
-        print(f"[CiefpStalkerFiles] EPG fetch started for stream_id: {stream_id}")
+        print(f"[CiefpSfiles] EPG fetch started for stream_id: {stream_id}")
 
         # Prikaži ikonicu dok se ne utvrdi da li ima EPG-a
         try:
@@ -427,7 +427,7 @@ class LiveScreen(Screen):
                         self["epg_next_desc"].setText(next_desc)
 
                 except Exception as e:
-                    print(f"[CiefpStalkerFiles] EPG UI update error: {e}")
+                    print(f"[CiefpSfiles] EPG UI update error: {e}")
                     try:
                         self["info_icon"].hide()
                     except Exception:
@@ -438,7 +438,7 @@ class LiveScreen(Screen):
             self._epg_timer.start(10, True)
 
         except Exception as e:
-            print(f"[CiefpStalkerFiles] EPG fetch error: {e}")
+            print(f"[CiefpSfiles] EPG fetch error: {e}")
             try:
                 self["info_icon"].hide()
             except Exception:
@@ -572,7 +572,7 @@ class LiveScreen(Screen):
             self._update_info()
             self["status"].setText("Returned to Live TV.")
         except Exception as e:
-            print(f"[CiefpStalkerFiles] Return error: {e}")
+            print(f"[CiefpSfiles] Return error: {e}")
 
     def open_epg(self):
         idx = self["left_list"].getSelectedIndex()

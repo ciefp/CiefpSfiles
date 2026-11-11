@@ -428,24 +428,51 @@ class MainScreen(Screen):
         if self.current_series is not None and self.current_season is None:
             series_info = self.current_series.get("info", {})
             base_name = series_info.get("name", "Unknown Series")
+            tmdb_id = series_info.get("tmdb") or series_info.get("tmdb_id")  # Uzimamo TMDB ID
+
             if 0 < idx <= len(self.streams):
                 season_num = self.streams[idx - 1]
                 self._clear_info_panel()
                 self["movie_title"].setText(f"Series: {base_name}")
-                self["plot"].setText(f"Season {season_num}\nSelect an episode to play.")
+                self["plot"].setText(f"Season {season_num}\n\nLoading metadata...")
+
+                # Pozivamo novu funkciju za TMDB
+                from ..core.metadata import fetch_episode_metadata_async
+                def _on_season_meta(success, data):
+                    if success:
+                        self["plot"].setText(f"Season {season_num}\n\n{data.get('plot')}")
+                        self["rating"].setText(f"TMDB: {data.get('rating')}/10")
+                    else:
+                        self["plot"].setText(f"Season {season_num}\nSelect an episode to play.")
+
+                # Za sezone koristimo epizodu 1 kao reprezent (TMDB nema posebno "season" polje za opis osim ako se ne zove /season/{num})
+                fetch_episode_metadata_async(tmdb_id, season_num, 1, _on_season_meta)
             return
 
         # 4. SERIJE (Epizode)
         if self.current_series is not None and self.current_season is not None:
             series_info = self.current_series.get("info", {})
             base_name = series_info.get("name", "Unknown Series")
+            tmdb_id = series_info.get("tmdb") or series_info.get("tmdb_id")
+
             if 0 < idx <= len(self.streams):
                 ep = self.streams[idx - 1]
                 ep_num = ep.get("episode_num")
                 title = ep.get("title", "Unknown")
+
                 self._clear_info_panel()
                 self["movie_title"].setText(f"Series: {base_name}")
-                self["plot"].setText(f"S{self.current_season}E{ep_num} - {title}\n\nPress OK to play.")
+                self["plot"].setText(f"S{self.current_season}E{ep_num} - {title}\n\nLoading metadata...")
+
+                from ..core.metadata import fetch_episode_metadata_async
+                def _on_ep_meta(success, data):
+                    if success:
+                        self["plot"].setText(
+                            f"S{self.current_season}E{ep_num} - {data.get('title')}\n\n{data.get('plot')}")
+                    else:
+                        self["plot"].setText(f"S{self.current_season}E{ep_num} - {title}\n\nPress OK to play.")
+
+                fetch_episode_metadata_async(tmdb_id, self.current_season, ep_num, _on_ep_meta)
             return
 
     def _trigger_tmdb_fetch(self, title, media_type):

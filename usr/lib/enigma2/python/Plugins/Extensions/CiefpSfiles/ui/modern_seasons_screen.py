@@ -18,10 +18,11 @@ from Screens.MessageBox import MessageBox
 from enigma import eTimer, eServiceReference, eListboxPythonMultiContent, gFont, loadPNG, RT_HALIGN_LEFT, RT_VALIGN_CENTER
 from Tools.LoadPixmap import LoadPixmap
 
+from ..core.metadata import fetch_metadata_async, fetch_omdb_rating_async, fetch_episode_metadata_async
 from ..core.paths import POSTERS_CACHE_DIR
-from ..core.metadata import fetch_metadata_async, fetch_omdb_rating_async
 from ..core.stalker_api import StalkerAPI
 from ..core.config import config
+
 def _load_pixmap_safe(path):
     if path and os.path.exists(path):
         try:
@@ -106,7 +107,7 @@ class ModernSeasonsScreen(Screen):
             <widget name="cast_name_4" position="1230,920" size="160,40" font="Regular;18" halign="center" foregroundColor="#FFFFFF" backgroundColor="#011a2e" transparent="1"/>
 
             <!-- DESNI PANEL: Poster -->
-            <widget name="logo" position="1420,110" size="450,675"
+            <widget name="logo" position="1410,110" size="500,750"
                     alphatest="blend" zPosition="2"/>
 
             <!-- STATUS (Pomeren dole levo) -->
@@ -124,17 +125,23 @@ class ModernSeasonsScreen(Screen):
                     foregroundColor="white" backgroundColor="#008000" halign="center" valign="center"/>
         </screen>
     """
-    def __init__(self, session, portal, series_id, series_title, poster_path=None):
+
+    def __init__(self, session, portal, series_id, series_title, poster_path=None, tmdb_data=None):
         Screen.__init__(self, session)
         self.session = session
         self.portal = portal
         self.series_id = series_id
         self.series_title = series_title
-        self.poster_path = poster_path  # <-- DODATO
+        self.poster_path = poster_path
+        self.tmdb_data = tmdb_data or {}
 
-        
+        # ISPRAVKA: Izvuci TMDB ID iz prosleđenih podataka
+        self.tmdb_id = self.tmdb_data.get("id") or self.tmdb_data.get("tmdb_id")
+        print(f"[CiefpSfiles DEBUG] TMDB ID za serije: {self.tmdb_id}")
+
+        # OVA LINIJA JE NEDOSTAJALA:
         self.api = StalkerAPI(portal["host"], portal["mac"], portal["password"])
-        
+
         self.seasons = []
         self.episodes = []
         self.current_season = None
@@ -201,7 +208,9 @@ class ModernSeasonsScreen(Screen):
         self._fetch_metadata()
         self["status"].setText("Loading seasons...")
         self.load_seasons()
-
+        # DODAJ OVU LINIJU:
+        self._on_selection_changed()
+        
     def load_seasons(self):
         ok, data, err = self.api.get_series_info(self.series_id)
         if ok and data:
@@ -236,7 +245,7 @@ class ModernSeasonsScreen(Screen):
     def render_seasons(self):
         items = []
         icon_season = _get_icon_path("icon_season.png")
-        
+
         for idx, season_num in enumerate(self.seasons):
             text = f"Season {season_num}"
             if os.path.exists(icon_season):
@@ -254,10 +263,28 @@ class ModernSeasonsScreen(Screen):
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                           text=text)
                 ])
-        
+
         self["left_list"].setList(items)
         self["left_list"].moveToIndex(0)
         self["status"].setText(f"Loaded {len(self.seasons)} seasons. Press OK to open.")
+
+        # ODMAH povuci opis za prvu sezonu (kao u klasičnom)
+        if self.seasons and self.tmdb_id:
+            season_num = self.seasons[0]
+            self["plot"].setText(f"Season {season_num}\n\nLoading metadata...")
+
+            def _on_season_meta(success, data):
+                def _set_text():
+                    if success:
+                        self["plot"].setText(f"Season {season_num}\n\n{data.get('plot')}")
+                    else:
+                        self["plot"].setText(f"Season {season_num}\nSelect an episode to play.")
+
+                t = eTimer()
+                t.callback.append(_set_text)
+                t.start(10, True)
+
+            fetch_episode_metadata_async(self.tmdb_id, season_num, 1, _on_season_meta)
 
     def load_episodes(self, season_num):
         ok, data, err = self.api.get_series_info(self.series_id)
@@ -288,7 +315,7 @@ class ModernSeasonsScreen(Screen):
     def render_episodes(self):
         items = []
         icon_play = _get_icon_path("icon_play.png")
-        
+
         # BACK dugme
         items.append([
             ("BACK", "back"),
@@ -296,12 +323,16 @@ class ModernSeasonsScreen(Screen):
                                   flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                   text="[ BACK TO SEASONS ]")
         ])
-        
-        for ep in self.episodes:
+
+        # Postavljamo episode_num ručno
+        for i, ep in enumerate(self.episodes):
+            if not ep.get("episode_num"):
+                ep["episode_num"] = i + 1
+
             ep_num = ep.get("episode_num")
             title = ep.get("title", "Unknown")
             text = f"S{self.current_season}E{ep_num} - {title}"
-            
+
             if os.path.exists(icon_play):
                 items.append([
                     (ep, "episode"),
@@ -317,22 +348,65 @@ class ModernSeasonsScreen(Screen):
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                           text=text)
                 ])
-        
+
         self["left_list"].setList(items)
         self["left_list"].moveToIndex(0)
         self["status"].setText(f"Season {self.current_season}: {len(self.episodes)} episodes.")
 
+        # ODMAH povuci opis za prvu epizodu (kao u klasičnom)
+        if self.episodes and self.tmdb_id:
+            ep = self.episodes[0]
+            ep_num = ep.get("episode_num")
+            title = ep.get("title", "Unknown")
+            self["plot"].setText(f"S{self.current_season}E{ep_num} - {title}\n\nLoading metadata...")
+
+            def _on_ep_meta(success, data):
+                def _set_text():
+                    if success:
+                        self["plot"].setText(
+                            f"S{self.current_season}E{ep_num} - {data.get('title')}\n\n{data.get('plot')}")
+                    else:
+                        self["plot"].setText(f"S{self.current_season}E{ep_num} - {title}\n\nPress OK to play.")
+
+                t = eTimer()
+                t.callback.append(_set_text)
+                t.start(10, True)
+
+            fetch_episode_metadata_async(self.tmdb_id, self.current_season, ep_num, _on_ep_meta)
+
     def on_up(self):
         try:
             self["left_list"].up()
+            self._on_selection_changed()
         except Exception:
             pass
 
     def on_down(self):
         try:
             self["left_list"].down()
+            self._on_selection_changed()
         except Exception:
             pass
+
+    def _on_selection_changed(self):
+        idx = self["left_list"].getSelectedIndex()
+
+        if not self.is_showing_episodes:
+            # Lista sezona
+            if 0 <= idx < len(self.seasons):
+                season_num = self.seasons[idx]
+                self._update_plot_for_selection(season_num)
+        else:
+            # Lista epizoda
+            if 0 < idx <= len(self.episodes):
+                ep = self.episodes[idx - 1]
+                ep_num = ep.get("episode_num")
+
+                # Ako iz nekog razloga episode_num nije postavljen, uzimamo indeks
+                if ep_num is None:
+                    ep_num = idx
+
+                self._update_plot_for_selection(self.current_season, ep_num)
 
     def on_ok(self):
         idx = self["left_list"].getSelectedIndex()
@@ -410,11 +484,13 @@ class ModernSeasonsScreen(Screen):
             self["rating"].setText(f"TMDB: {data.get('rating', '0.0')}/10 ★")
             self["genres"].setText(f"Genres: {data.get('genres', '-')}")
             self["director"].setText(f"Creator: {data.get('director', '-')}")
-
-            plot = data.get("plot", "-")
-            if len(plot) > 450:
-                plot = plot[:450] + "..."
-            self["plot"].setText(f"Plot:\n{plot}")
+            # Proveravamo da li je korisnik već ušao u epizode.
+            # Ako jeste, NE diramo plot, jer je tamo već opis epizode.
+            if not self.is_showing_episodes and self.current_season is None:
+                plot = data.get("plot", "-")
+                if len(plot) > 450:
+                    plot = plot[:450] + "..."
+                self["plot"].setText(f"Plot:\n{plot}")
 
             self["imdb_rating"].setText("IMDB: Loading...")
             fetch_omdb_rating_async(data.get('title'), data.get('year'), self._on_imdb_data)
@@ -451,6 +527,49 @@ class ModernSeasonsScreen(Screen):
         self._tmdb_ui_timer = eTimer()
         self._tmdb_ui_timer.callback.append(_update_ui)
         self._tmdb_ui_timer.start(10, True)
+
+    def _update_plot_for_selection(self, season_num, episode_num=None):
+        if not self.tmdb_id:
+            self["plot"].setText("Plot:\nOpis nije dostupan (Nema TMDB ID).")
+            return
+
+        import re
+        s_clean = re.sub(r'\D', '', str(season_num))
+        if not s_clean:
+            s_clean = "1"
+
+        ep_clean = None
+        if episode_num is not None:
+            ep_clean = re.sub(r'\D', '', str(episode_num))
+            if not ep_clean:
+                ep_clean = "1"
+
+        target_ep = ep_clean if ep_clean else "1"
+        self["plot"].setText("Plot:\nLoading...")
+
+        # Direktan poziv preko standardne funkcije iz metadata.py bez kompleksnih tajmera koji blokiraju
+        from ..core.metadata import _get_api_key, _fetch_json
+
+        def worker():
+            api_key = _get_api_key()
+            plot_text = "No description available."
+            if api_key and self.tmdb_id:
+                url = f"https://api.themoviedb.org/3/tv/{self.tmdb_id}/season/{s_clean}/episode/{target_ep}?api_key={api_key}&language=en-US"
+                data = _fetch_json(url)
+                if data and isinstance(data, dict):
+                    overview = data.get("overview")
+                    if overview:
+                        plot_text = overview
+
+            def update_ui():
+                self["plot"].setText(f"Plot:\n{plot_text}")
+
+            from enigma import eTimer
+            self._plot_timer = eTimer()
+            self._plot_timer.callback.append(update_ui)
+            self._plot_timer.start(10, True)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_imdb_data(self, success, rating):
         def _update_ui():

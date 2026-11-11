@@ -166,6 +166,8 @@ def fetch_metadata_async(title, media_type, callback):
             info["year"] = (details.get("release_date") or details.get("first_air_date") or "")[:4]
             info["rating"] = details.get("vote_average", 0)
             info["plot"] = details.get("overview", "No plot available.")
+            info["id"] = tmdb_id
+            info["tmdb_id"] = tmdb_id
 
             genres = [g["name"] for g in details.get("genres", [])]
             info["genres"] = ", ".join(genres) if genres else "-"
@@ -243,6 +245,34 @@ def fetch_omdb_rating_async(title, year, callback):
             callback(False, "N/A")
         except Exception as e:
             print(f"[CiefpSfiles] OMDb Error: {e}")
+            callback(False, str(e))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def fetch_episode_metadata_async(tmdb_id, season_num, episode_num, callback):
+    def worker():
+        api_key = _get_api_key()
+        if not api_key or not tmdb_id:
+            callback(False, "Missing TMDB ID or API Key")
+            return
+
+        try:
+            # Povlačimo detalje za epizodu
+            url = f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season_num}/episode/{episode_num}?api_key={api_key}&language=en-US"
+            data = _fetch_json(url)
+            if not data:
+                callback(False, "Episode not found on TMDB")
+                return
+
+            info = {
+                "title": data.get("name", f"Episode {episode_num}"),
+                "plot": data.get("overview", "No description available."),
+                "still_path": data.get("still_path"),
+                "rating": data.get("vote_average", 0.0),
+            }
+            callback(True, info)
+        except Exception as e:
             callback(False, str(e))
 
     threading.Thread(target=worker, daemon=True).start()

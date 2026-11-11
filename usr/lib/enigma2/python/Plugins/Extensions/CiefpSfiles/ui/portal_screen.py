@@ -151,9 +151,7 @@ class PortalScreen(Screen):
         self.container.appClosed.append(self.command_finished)
         self.container.dataAvail.append(self.version_data_avail)
 
-        # Updates are intentionally disabled until this renamed fork has its own
-        # signed release feed; using the old feed could reinstall Xtream code.
-        self["version_status"].setText("CiefpSfiles local build")
+        self.check_for_updates()
     # ---------- UPDATE PLUGIN ------------
     def check_for_updates(self):
         if self.version_check_in_progress:

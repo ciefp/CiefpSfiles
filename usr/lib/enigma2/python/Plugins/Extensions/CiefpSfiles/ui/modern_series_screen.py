@@ -310,13 +310,14 @@ class ModernSeriesScreen(Screen):
         self._tmdb_timer.callback.append(_do_fetch)
         self._tmdb_timer.start(300, True)
 
-
     def _on_tmdb_data(self, success, data):
         def _update_ui():
             if not success or not data:
                 self["plot"].setText("TMDB Metadata not found.")
                 return
 
+            # DODAJ OVU LINIJU:
+            self._current_tmdb_data = data
             self._current_series_poster = data.get("poster_path")
 
             self["movie_title"].setText(f"{data.get('title', 'Unknown')} ({data.get('year', '')})")
@@ -421,25 +422,24 @@ class ModernSeriesScreen(Screen):
 
         if stream_idx >= len(self.streams):
             return
-        
+
         stream = self.streams[stream_idx]
         series_id = stream.get("series_id")
-        title = clean_title(stream.get("name", "Unknown")) # <--- DODATO
+        title = clean_title(stream.get("name", "Unknown"))
 
+        # Uzimamo TMDB rečnik koji je sačuvan tokom _on_tmdb_data
+        tmdb_data = getattr(self, '_current_tmdb_data', None)
+        poster_path = tmdb_data.get("poster_path") if tmdb_data else None
 
-        # Uzimamo poster_path iz trenutno učitanih TMDB podataka
-        poster_path = None
-        if hasattr(self, '_current_series_poster') and self._current_series_poster:
-            poster_path = self._current_series_poster
-
-        # Otvaramo ekran za sezone
         self.session.open(
             ModernSeasonsScreen,
             self.portal,
             series_id,
             title,
-            poster_path  # <-- DODATO
+            poster_path,
+            tmdb_data  # Prosleđujemo ceo rečnik
         )
+
 
     def search_content(self):
         def do_search(search_term):
