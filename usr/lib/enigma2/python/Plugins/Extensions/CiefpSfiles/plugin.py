@@ -16,7 +16,7 @@ from Plugins.Plugin import PluginDescriptor
 
 PLUGIN_NAME = "CiefpSfiles"
 PLUGIN_DESC = "Stalker/Ministra IPTV plugin with TMDB/OMDb enrichment"
-PLUGIN_VERSION = "2.0.0"
+PLUGIN_VERSION = "2.1.0"
 PLUGIN_DIR = os.path.dirname(__file__) if '__file__' in globals() else \
     "/usr/lib/enigma2/python/Plugins/Extensions/CiefpSfiles"
 

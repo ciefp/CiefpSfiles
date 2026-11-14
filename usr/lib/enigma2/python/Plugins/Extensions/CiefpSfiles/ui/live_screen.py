@@ -580,9 +580,18 @@ class LiveScreen(Screen):
             stream = self.streams[idx - 1]
             stream_id = stream.get("stream_id")
             channel_name = stream.get("name", "Unknown")
+            stream_icon = stream.get("stream_icon")
 
             from .epg_screen import EPGScreen
-            self.session.open(EPGScreen, self.api, stream_id, channel_name)
+            self.session.open(
+                EPGScreen,
+                self.api,
+                stream_id,
+                channel_name,
+                stream_icon=stream_icon,
+                channels_list=self.streams,
+                current_channel_idx=idx - 1,
+            )
 
     def open_settings(self):
         from .settings_screen import SettingsScreen
