@@ -20,6 +20,7 @@ from enigma import eTimer, eServiceReference
 
 from Tools.LoadPixmap import LoadPixmap
 
+from ..core.recently_viewed import add_viewed_item, get_viewed_items
 from ..core.stalker_api import StalkerAPI
 from ..core.metadata import fetch_metadata_async, fetch_omdb_rating_async, translate_text_async
 from .settings_screen import SettingsScreen
@@ -121,11 +122,12 @@ class MainScreen(Screen):
                     foregroundColor="white" backgroundColor="#00802d" halign="center" valign="center"/>
         </screen>
     """
-
-    def __init__(self, session, portal, api_data):
+    def __init__(self, session, portal, api_data, start_view=None, start_category=None):
         Screen.__init__(self, session)
         self.session = session
         self.portal = portal
+        self._start_view = start_view
+        self._start_category = start_category
         
         # Inicijalizacija API klijenta
         self.api = StalkerAPI(portal["host"], portal["mac"], portal["password"])
@@ -189,7 +191,13 @@ class MainScreen(Screen):
 
     def on_start(self):
         self._set_poster(None)
-        self.show_home()
+
+        if self._start_view and self._start_category:
+            self.current_view = self._start_view
+            self.current_category = self._start_category
+            self._load_streams_for_category()
+        else:
+            self.show_home()
 
     def _set_poster(self, image_path):
         plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -272,6 +280,23 @@ class MainScreen(Screen):
             items.append([("SERIES", ""), MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                                                 flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                                                 text="> Series")])
+        # --- RECENTLY VIEWED ---
+        icon_recent = _get_icon_path("history.png")  # Ili icon_folder.png
+        if os.path.exists(icon_recent):
+            items.append([
+                ("RECENTLY_VIEWED", ""),
+                MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon_recent)),
+                MultiContentEntryText(pos=(50, 0), size=(650, 50), font=0,
+                                      flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                      text="> Recently Viewed")
+            ])
+        else:
+            items.append([
+                ("RECENTLY_VIEWED", ""),
+                MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
+                                      flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                      text="> Recently Viewed")
+            ])
 
         items.append([("", ""),
                       MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0, flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
@@ -401,6 +426,9 @@ class MainScreen(Screen):
         if self.current_category is not None and not self.current_series:
             if 0 < idx <= len(self.streams):
                 s = self.streams[idx - 1]
+                # Zaštita za RECENT i sezone
+                if not isinstance(s, dict):
+                    return
                 name = clean_title(s.get("name", "Unknown"))
                 rating = s.get("rating", "")
 
@@ -586,6 +614,8 @@ class MainScreen(Screen):
                 self.open_movies_groups()
             elif idx == 3:
                 self.open_series_groups()
+            elif idx == 4:
+                self.open_recently_viewed()
             return
 
         if self.current_category is None:
@@ -624,6 +654,33 @@ class MainScreen(Screen):
 
     def _load_streams_for_category(self):
         self["status"].setText("Loading streams...")
+
+        # Provera za Recently Viewed (Classic skin)
+        if self.current_category == "RECENT_VOD":
+            recent = get_viewed_items(self.portal.get("host", ""), "vod")
+            streams = []
+            for item in recent:
+                streams.append({
+                    "stream_id": item.get("id"),
+                    "name": item.get("name", "Unknown"),
+                    "container_extension": "mp4",
+                })
+            self.streams = streams
+            self._render_streams_classic()
+            return
+        elif self.current_category == "RECENT_SERIES":
+            recent = get_viewed_items(self.portal.get("host", ""), "series")
+            streams = []
+            for item in recent:
+                streams.append({
+                    "series_id": item.get("id"),
+                    "name": item.get("name", "Unknown"),
+                })
+            self.streams = streams
+            self._render_streams_classic()
+            return
+
+        # Standardna logika
         if self.current_view == "VOD":
             ok, data, err = self.api.get_vod_streams(self.current_category)
         elif self.current_view == "SERIES":
@@ -633,45 +690,51 @@ class MainScreen(Screen):
 
         if ok:
             self.streams = data
-            items = []
-            
-            # BACK dugme
-            items.append([
-                ("BACK", ""),
-                MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
-                                      flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                      text="[ BACK TO CATEGORIES ]")
-            ])
-
-            if self.current_view == "SERIES":
-                icon = _get_icon_path("icon_tv.png")
-            else:
-                icon = _get_icon_path("icon_film.png")
-
-            for s in self.streams:
-                name = clean_title(s.get("name", "Unknown"))
-                if os.path.exists(icon):
-                    items.append([
-                        (name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
-                        MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
-                        MultiContentEntryText(pos=(50, 0), size=(600, 50), font=0,
-                                              flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                              text=name)
-                    ])
-                else:
-                    items.append([
-                        (name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
-                        MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
-                                              flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                              text=name)
-                    ])
-
-            self["left_list"].setList(items)
-            self["left_list"].moveToIndex(0)
-            self["status"].setText(f"Loaded {len(self.streams)} items.")
-            self._update_info()
+            self._render_streams_classic()
         else:
             self["status"].setText(f"Error: {err}")
+
+    def _render_streams_classic(self):
+        items = []
+        items.append([
+            ("BACK", ""),
+            MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
+                                  flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                  text="[ BACK TO CATEGORIES ]")
+        ])
+
+        if self.current_view == "SERIES":
+            icon_name = "icon_tv.png"
+        else:
+            icon_name = "icon_film.png"
+        icon = _get_icon_path(icon_name)
+        icon_exists = os.path.exists(icon)
+
+        for s in self.streams:
+            if not isinstance(s, dict):
+                continue
+            name = clean_title(s.get("name", "Unknown"))
+            sid = s.get("stream_id") if "stream_id" in s else s.get("series_id")
+            if icon_exists:
+                items.append([
+                    (name, sid),
+                    MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
+                    MultiContentEntryText(pos=(50, 0), size=(600, 50), font=0,
+                                          flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                          text=name)
+                ])
+            else:
+                items.append([
+                    (name, sid),
+                    MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
+                                          flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                          text=name)
+                ])
+
+        self["left_list"].setList(items)
+        self["left_list"].moveToIndex(0)
+        self["status"].setText(f"Loaded {len(self.streams)} items.")
+        self._update_info()
 
     def _play_selected_stream(self):
         idx = self["left_list"].getSelectedIndex()
@@ -711,6 +774,31 @@ class MainScreen(Screen):
         except Exception as e:
             self["status"].setText(f"Error: {e}")
             return
+        # Sačuvaj u "Recently Viewed"
+        try:
+            if self.current_view == "VOD":
+                add_viewed_item(
+                    portal_host=self.portal.get("host", ""),
+                    item_type="vod",
+                    item_id=stream.get("stream_id"),
+                    item_name=stream.get("name", "Unknown")
+                )
+            elif self.current_view == "SERIES" and self.current_series:
+                series_info = self.current_series.get("info", {})
+                series_id = series_info.get("series_id")
+                series_name = series_info.get("name", "Unknown")
+                if not series_id and self.streams_series_data:
+                    series_id = self.streams_series_data.get("series_id")
+                    series_name = self.streams_series_data.get("name", series_name)
+                if series_id:
+                    add_viewed_item(
+                        portal_host=self.portal.get("host", ""),
+                        item_type="series",
+                        item_id=series_id,
+                        item_name=series_name
+                    )
+        except Exception as e:
+            print("[CiefpSfiles] Recently viewed save error: %s" % e)
 
         try:
             self.session.openWithCallback(
@@ -957,6 +1045,10 @@ class MainScreen(Screen):
             self["status"].setText("Returned to CiefpSfiles.")
         except Exception as e:
             print("[CiefpSfiles] Return error: {}".format(e))
+
+    def open_recently_viewed(self):
+        from .recently_viewed_screen import RecentlyViewedScreen
+        self.session.open(RecentlyViewedScreen, self.portal)
 
     def open_settings(self):
         self.session.open(SettingsScreen)

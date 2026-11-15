@@ -192,6 +192,23 @@ class ModernSeriesScreen(Screen):
         self.load_streams()
 
     def load_streams(self):
+        from ..core.recently_viewed import get_viewed_items
+        if self.category_id == "RECENT_SERIES":
+            recent = get_viewed_items(self.portal.get("host", ""), "series")
+            streams = []
+            for item in recent:
+                streams.append({
+                    "series_id": item.get("id"),
+                    "name": item.get("name", "Unknown"),
+                })
+            self.streams = streams
+            self.current_page = 0
+            self.selected_index = 0
+            if streams:
+                self.render_page()
+            else:
+                self["status"].setText("No recently viewed series.")
+            return
         # Za serije koristimo get_series (ne get_vod_streams)
         ok, data, err = self.api.get_series(self.category_id)
         if ok:
