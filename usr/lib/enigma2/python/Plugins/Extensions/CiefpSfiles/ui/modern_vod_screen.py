@@ -643,6 +643,18 @@ class ModernVODScreen(Screen):
         except Exception as e:
             self["status"].setText(f"Error: {e}")
             return
+        # Sačuvaj u "Recently Viewed"
+        try:
+            from ..core.recently_viewed import add_viewed_item
+            add_viewed_item(
+                portal_host=self.portal.get("host", ""),
+                item_type="vod",
+                item_id=stream_id,
+                item_name=title
+            )
+            print("[CiefpSfiles] RecentlyViewed: Saved movie %s (id=%s)" % (title, stream_id))
+        except Exception as e:
+            print("[CiefpSfiles] RecentlyViewed save error: %s" % e)
             
         try:
             self.session.openWithCallback(

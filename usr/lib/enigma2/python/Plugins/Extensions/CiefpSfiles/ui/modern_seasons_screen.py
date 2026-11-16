@@ -433,17 +433,17 @@ class ModernSeasonsScreen(Screen):
         ep_id = ep.get("id")
         title = ep.get("title", "Unknown")
         ext = ep.get("container_extension", "mp4")
-        
+
         try:
             url = self.api.build_series_url(ep_id, ext)
         except Exception as error:
             self["status"].setText("Episode link error: {}".format(error))
             return
-        
+
         encoded_url = url.replace(":", "%3a")
         safe_title = title.replace(":", " -").replace("\n", " ")
         ref_str = f"{self.player_type_vod}:0:1:0:0:0:0:0:0:0:{encoded_url}:{safe_title}"
-        
+
         try:
             ref = eServiceReference(ref_str)
             if not ref.valid():
@@ -452,7 +452,21 @@ class ModernSeasonsScreen(Screen):
         except Exception as e:
             self["status"].setText(f"Error: {e}")
             return
-            
+
+        # === DODATO: Sačuvaj u Recently Viewed ===
+        try:
+            from ..core.recently_viewed import add_viewed_item
+            add_viewed_item(
+                portal_host=self.portal.get("host", ""),
+                item_type="series",
+                item_id=self.series_id,
+                item_name=self.series_title
+            )
+            print("[CiefpSfiles] RecentlyViewed: Saved series %s (id=%s)" % (self.series_title, self.series_id))
+        except Exception as e:
+            print("[CiefpSfiles] RecentlyViewed save error: %s" % e)
+        # ===========================================
+
         try:
             self.session.openWithCallback(
                 self._on_player_closed,
