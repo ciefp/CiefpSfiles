@@ -404,6 +404,11 @@ class MainScreen(Screen):
             self._set_poster(None)
             return
 
+        # === DODATO: Ako smo u sezoni ili epizodi, NE diramo info panel ===
+        if self.current_season is not None:
+            return
+        # =================================================================
+
         # Provera za BACK dugme
         if idx == 0:
             self._clear_info_panel()
@@ -451,36 +456,46 @@ class MainScreen(Screen):
                     self["plot"].setText("Press OK to play.")
                     self._set_poster(None)
             return
+            # 3. SERIJE (Sezone)
+            if self.current_series is not None and self.current_season is None:
+                series_info = self.current_series.get("info", {})
+                base_name = getattr(self, '_saved_series_name', None) or series_info.get("name", "Unknown Series")
+                tmdb_id = series_info.get("tmdb") or series_info.get("tmdb_id")
 
-        # 3. SERIJE (Sezone)
-        if self.current_series is not None and self.current_season is None:
-            series_info = self.current_series.get("info", {})
-            base_name = series_info.get("name", "Unknown Series")
-            tmdb_id = series_info.get("tmdb") or series_info.get("tmdb_id")  # Uzimamo TMDB ID
+                if 0 < idx <= len(self.streams):
+                    season_num = self.streams[idx - 1]
+                    self._clear_info_panel()
+                    self["movie_title"].setText(f"Series: {base_name} - Season {season_num}")
 
-            if 0 < idx <= len(self.streams):
-                season_num = self.streams[idx - 1]
-                self._clear_info_panel()
-                self["movie_title"].setText(f"Series: {base_name}")
-                self["plot"].setText(f"Season {season_num}\n\nLoading metadata...")
-
-                # Pozivamo novu funkciju za TMDB
-                from ..core.metadata import fetch_episode_metadata_async
-                def _on_season_meta(success, data):
-                    if success:
-                        self["plot"].setText(f"Season {season_num}\n\n{data.get('plot')}")
-                        self["rating"].setText(f"TMDB: {data.get('rating')}/10")
+                    # Proveri da li već imamo sačuvane TMDB podatke (kao kod epizoda)
+                    if hasattr(self, '_saved_series_tmdb_data') and self._saved_series_tmdb_data:
+                        data = self._saved_series_tmdb_data
+                        plot = data.get("plot", "-")
+                        if len(plot) > 450:
+                            plot = plot[:450] + "..."
+                        self["plot"].setText(f"Plot:\n{plot}")
+                        self["rating"].setText(f"TMDB: {data.get('rating')}/10 ★")
+                        self["genres"].setText(f"Genres: {data.get('genres')}")
+                        self["director"].setText(f"Director: {data.get('director')}")
+                        cast = data.get('cast', '-')
+                        if cast != '-':
+                            self["cast_header"].setText("Cast:")
+                            self["cast"].setText(cast)
+                        else:
+                            self["cast_header"].setText("")
+                            self["cast"].setText("")
                     else:
-                        self["plot"].setText(f"Season {season_num}\nSelect an episode to play.")
+                        self["plot"].setText(f"Season {season_num}\n\nLoading metadata...")
 
-                # Za sezone koristimo epizodu 1 kao reprezent (TMDB nema posebno "season" polje za opis osim ako se ne zove /season/{num})
-                fetch_episode_metadata_async(tmdb_id, season_num, 1, _on_season_meta)
-            return
+                    if self._saved_poster:
+                        self._set_poster(self._saved_poster)
+                return
 
         # 4. SERIJE (Epizode)
         if self.current_series is not None and self.current_season is not None:
             series_info = self.current_series.get("info", {})
-            base_name = series_info.get("name", "Unknown Series")
+            # ISPRAVKA: Koristi _saved_series_name
+            base_name = getattr(self, '_saved_series_name', None) or series_info.get("name", "Unknown Series")
             tmdb_id = series_info.get("tmdb") or series_info.get("tmdb_id")
 
             if 0 < idx <= len(self.streams):
@@ -502,6 +517,7 @@ class MainScreen(Screen):
 
                 fetch_episode_metadata_async(tmdb_id, self.current_season, ep_num, _on_ep_meta)
             return
+
 
     def _trigger_tmdb_fetch(self, title, media_type):
         if title == self._last_tmdb_title:
@@ -527,27 +543,45 @@ class MainScreen(Screen):
                 self["plot"].setText(f"TMDB Error: {data}")
                 return
 
-            # DODAJTE OVU LINIJU:
-            self._current_poster_path = data.get("poster_path")
+            # Sačuvaj TMDB podatke za kasnije (i za sezone)
+            if self.current_view == "SERIES":
+                self._saved_series_tmdb_data = data
 
+            # Ako smo u sezoni, ažuriraj samo tekstualne widgete, ne diraj poster
+            if self.current_season is not None:
+                plot = data.get("plot", "-")
+                if len(plot) > 450:
+                    plot = plot[:450] + "..."
+                self["plot"].setText(f"Plot:\n{plot}")
+                self["rating"].setText(f"TMDB: {data.get('rating')}/10 ★")
+                self["genres"].setText(f"Genres: {data.get('genres')}")
+                self["director"].setText(f"Director: {data.get('director')}")
+                cast = data.get('cast', '-')
+                if cast != '-':
+                    self["cast_header"].setText("Cast:")
+                    self["cast"].setText(cast)
+                else:
+                    self["cast_header"].setText("")
+                    self["cast"].setText("")
+                return  # Ne diramo poster
+            # ----------------------------------------------------------
+
+            # Ostatak koda za listu serija
+            self._current_poster_path = data.get("poster_path")
             plot = data.get("plot", "-")
             if len(plot) > 450:
                 plot = plot[:450] + "..."
-
             self["plot"].setText(f"Plot:\n{plot}")
-            
             if config.plugins.ciefpsfiles.groq_plot_translation.value:
                 self["plot"].setText(f"Plot:\n{plot}\n\n(Translating...)")
                 translate_text_async(plot, self._on_translated_plot)
             else:
                 self["plot"].setText(f"Plot:\n{plot}")
-
             self["movie_title"].setText(f"{data.get('title')} ({data.get('year')})")
             self["epg_title"].setText("")
             self["rating"].setText(f"TMDB: {data.get('rating')}/10 ★")
             self["genres"].setText(f"Genres: {data.get('genres')}")
             self["director"].setText(f"Director: {data.get('director')}")
-            
             cast = data.get('cast', '-')
             if cast != '-':
                 self["cast_header"].setText("Cast:")
@@ -555,10 +589,8 @@ class MainScreen(Screen):
             else:
                 self["cast_header"].setText("")
                 self["cast"].setText("")
-
             self["duration"].setText("")
             self["imdb_rating"].setText("IMDB: Loading...")
-
             fetch_omdb_rating_async(data.get('title'), data.get('year'), self._on_omdb_data)
             self._set_poster(data.get("poster_path"))
 
@@ -749,6 +781,7 @@ class MainScreen(Screen):
                 ext = stream.get("container_extension", "mp4")
                 url = self.api.build_series_url(ep_id, ext)
                 title = stream.get("title", "Unknown")
+                ep_num = stream.get("episode_num", 1)  # <-- DODATO
             elif self.current_view == "VOD":
                 stream_id = stream.get("stream_id")
                 title = stream.get("name", "Unknown")
@@ -774,7 +807,8 @@ class MainScreen(Screen):
         except Exception as e:
             self["status"].setText(f"Error: {e}")
             return
-        # Sačuvaj u "Recently Viewed"
+
+        # Sačuvaj u "Recently Viewed" + označi epizodu
         try:
             if self.current_view == "VOD":
                 add_viewed_item(
@@ -795,7 +829,22 @@ class MainScreen(Screen):
                         portal_host=self.portal.get("host", ""),
                         item_type="series",
                         item_id=series_id,
-                        item_name=series_name
+                        item_name=series_name,
+                        extra_data={
+                            "last_episode": {
+                                "season": self.current_season,
+                                "episode": ep_num,
+                                "title": title
+                            }
+                        }
+                    )
+                    # Označi epizodu kao gledanu
+                    from ..core.recently_viewed import mark_episode_watched
+                    mark_episode_watched(
+                        self.portal.get("host", ""),
+                        series_id,
+                        self.current_season,
+                        ep_num
                     )
         except Exception as e:
             print("[CiefpSfiles] Recently viewed save error: %s" % e)
@@ -816,9 +865,9 @@ class MainScreen(Screen):
         series_id = series_data.get("series_id")
         series_name = series_data.get("name", "Unknown")
 
-        # DODAJTE OVE DVE LINIJE:
         self._saved_poster = getattr(self, '_current_poster_path', None)
         self._saved_series_name = series_name
+        self._saved_series_info = series_data  # <-- DODATO
 
         self["status"].setText(f"Loading seasons for {series_name}...")
 
@@ -836,7 +885,6 @@ class MainScreen(Screen):
                 self.streams = []
 
                 items = []
-                # BACK dugme
                 items.append([
                     ("BACK", ""),
                     MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
@@ -846,24 +894,19 @@ class MainScreen(Screen):
                 icon_season = _get_icon_path("icon_season.png")
                 episodes_raw = data.get("episodes", {})
 
-                # --- DODATO: Normalizacija podataka (rečnik vs lista) ---
                 episodes = {}
                 if isinstance(episodes_raw, dict):
-                    # Provajder vraća rečnik, sve je u redu
                     episodes = episodes_raw
                 elif isinstance(episodes_raw, list):
-                    # Provajder vraća listu, moramo je grupisati po sezonama
                     for ep in episodes_raw:
                         season = str(ep.get("season", "1"))
                         if season not in episodes:
                             episodes[season] = []
                         episodes[season].append(ep)
-                # ---------------------------------------------------------
 
                 if not episodes:
                     items.append([("NONE", ""), MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0, flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER, text="No episodes found.")])
                 else:
-                    # Sada je bezbedno pozvati .keys() jer smo osigurali da je 'episodes' rečnik
                     for season_num in sorted(episodes.keys(), key=int):
                         season_text = f"Season {season_num}"
                         if os.path.exists(icon_season):
@@ -890,7 +933,6 @@ class MainScreen(Screen):
                     self["left_list"].moveToIndex(0)
                 self["status"].setText(f"Loaded {len(episodes)} seasons.")
 
-                # DODAJTE OVO:
                 self["movie_title"].setText(f"Series: {series_name}")
                 if self._saved_poster:
                     self._set_poster(self._saved_poster)
@@ -910,26 +952,37 @@ class MainScreen(Screen):
         episodes = self.current_series.get("episodes", {}).get(self.current_season, [])
 
         items = []
-        # BACK dugme
         items.append([
             ("BACK", ""),
             MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                   flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                   text="[ BACK TO SEASONS ]")
         ])
-        
+
         self.streams = []
         icon_play = _get_icon_path("icon_play.png")
+        icon_watched = _get_icon_path("icon_watched.png")
+
+        from ..core.recently_viewed import get_watched_episodes
+        series_info = self.current_series.get("info", {})
+        series_id = series_info.get("series_id")
+        if not series_id and self.streams_series_data:
+            series_id = self.streams_series_data.get("series_id")
+        watched = get_watched_episodes(self.portal.get("host", ""), series_id)
 
         for ep in episodes:
             ep_num = ep.get("episode_num")
             title = ep.get("title", "Unknown")
             ep_text = f"S{season_num}E{ep_num} - {title}"
-            
-            if os.path.exists(icon_play):
+
+            key = f"{season_num}_{ep_num}"
+            is_watched = key in watched
+            icon = icon_watched if is_watched else icon_play
+
+            if os.path.exists(icon):
                 items.append([
                     (ep_text, ep.get("id")),
-                    MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon_play)),
+                    MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
                     MultiContentEntryText(pos=(50, 0), size=(600, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                           text=ep_text)
@@ -947,15 +1000,39 @@ class MainScreen(Screen):
         self["left_list"].moveToIndex(0)
         self["status"].setText(f"Loaded {len(episodes)} episodes for Season {season_num}.")
 
-        # Prvo osvežite info panel (koji sada neće obrisati poster)
-        self._update_info()
+        # === INFO PANEL SA PODACIMA SERIJE ===
+        base_name = getattr(self, '_saved_series_name', None) or "Unknown Series"
+        self._clear_info_panel()
+        self["movie_title"].setText(f"Series: {base_name} - Season {season_num}")
 
-        # Zatim forsirajte poster i naslov
-        self["movie_title"].setText(f"Series: {self._saved_series_name}")
+        # Proveri da li imamo sačuvane TMDB podatke za seriju
+        if hasattr(self, '_saved_series_tmdb_data') and self._saved_series_tmdb_data:
+            data = self._saved_series_tmdb_data
+            plot = data.get("plot", "-")
+            if len(plot) > 450:
+                plot = plot[:450] + "..."
+            self["plot"].setText(f"Plot:\n{plot}")
+            self["rating"].setText(f"TMDB: {data.get('rating')}/10 ★")
+            self["genres"].setText(f"Genres: {data.get('genres')}")
+            self["director"].setText(f"Director: {data.get('director')}")
+            cast = data.get('cast', '-')
+            if cast != '-':
+                self["cast_header"].setText("Cast:")
+                self["cast"].setText(cast)
+            else:
+                self["cast_header"].setText("")
+                self["cast"].setText("")
+        else:
+            # Ako nema TMDB podataka, pokušaj da ih učitaš ponovo
+            self["plot"].setText("Loading metadata...")
+            series_name = getattr(self, '_saved_series_name', None) or ""
+            if series_name:
+                # Resetujemo _last_tmdb_title da bi fetch ponovo krenuo
+                self._last_tmdb_title = None
+                self._trigger_tmdb_fetch(series_name, "tv")
+
         if self._saved_poster:
             self._set_poster(self._saved_poster)
-        else:
-            self._set_poster(None)
 
     def search_content(self):
         # Pretraga radi samo kada smo u listi filmova ili serija (ne u kategorijama)

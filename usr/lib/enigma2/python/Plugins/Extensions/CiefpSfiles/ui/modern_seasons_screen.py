@@ -315,6 +315,11 @@ class ModernSeasonsScreen(Screen):
     def render_episodes(self):
         items = []
         icon_play = _get_icon_path("icon_play.png")
+        icon_watched = _get_icon_path("icon_watched.png")
+
+        # Uzimamo listu gledanih epizoda
+        from ..core.recently_viewed import get_watched_episodes
+        watched = get_watched_episodes(self.portal.get("host", ""), self.series_id)
 
         # BACK dugme
         items.append([
@@ -324,7 +329,6 @@ class ModernSeasonsScreen(Screen):
                                   text="[ BACK TO SEASONS ]")
         ])
 
-        # Postavljamo episode_num ručno
         for i, ep in enumerate(self.episodes):
             if not ep.get("episode_num"):
                 ep["episode_num"] = i + 1
@@ -333,10 +337,15 @@ class ModernSeasonsScreen(Screen):
             title = ep.get("title", "Unknown")
             text = f"S{self.current_season}E{ep_num} - {title}"
 
-            if os.path.exists(icon_play):
+            # Proveri da li je gledana
+            key = f"{self.current_season}_{ep_num}"
+            is_watched = key in watched
+            icon = icon_watched if is_watched else icon_play
+
+            if os.path.exists(icon):
                 items.append([
                     (ep, "episode"),
-                    MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon_play)),
+                    MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
                     MultiContentEntryText(pos=(50, 0), size=(800, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                           text=text)
@@ -353,7 +362,7 @@ class ModernSeasonsScreen(Screen):
         self["left_list"].moveToIndex(0)
         self["status"].setText(f"Season {self.current_season}: {len(self.episodes)} episodes.")
 
-        # ODMAH povuci opis za prvu epizodu (kao u klasičnom)
+        # ODMAH povuci opis za prvu epizodu (ako imamo tmdb_id)
         if self.episodes and self.tmdb_id:
             ep = self.episodes[0]
             ep_num = ep.get("episode_num")
@@ -433,6 +442,7 @@ class ModernSeasonsScreen(Screen):
         ep_id = ep.get("id")
         title = ep.get("title", "Unknown")
         ext = ep.get("container_extension", "mp4")
+        ep_num = ep.get("episode_num", 1)
 
         try:
             url = self.api.build_series_url(ep_id, ext)
@@ -453,19 +463,33 @@ class ModernSeasonsScreen(Screen):
             self["status"].setText(f"Error: {e}")
             return
 
-        # === DODATO: Sačuvaj u Recently Viewed ===
+        # === Sačuvaj u Recently Viewed + Označi epizodu ===
         try:
-            from ..core.recently_viewed import add_viewed_item
+            from ..core.recently_viewed import add_viewed_item, mark_episode_watched
             add_viewed_item(
                 portal_host=self.portal.get("host", ""),
                 item_type="series",
                 item_id=self.series_id,
-                item_name=self.series_title
+                item_name=self.series_title,
+                extra_data={
+                    "last_episode": {
+                        "season": self.current_season,
+                        "episode": ep_num,
+                        "title": title
+                    }
+                }
             )
-            print("[CiefpSfiles] RecentlyViewed: Saved series %s (id=%s)" % (self.series_title, self.series_id))
+            mark_episode_watched(
+                self.portal.get("host", ""),
+                self.series_id,
+                self.current_season,
+                ep_num
+            )
+            print("[CiefpSfiles] RecentlyViewed: Saved series %s (S%sE%s)" % (
+                self.series_title, self.current_season, ep_num))
         except Exception as e:
             print("[CiefpSfiles] RecentlyViewed save error: %s" % e)
-        # ===========================================
+        # =================================================
 
         try:
             self.session.openWithCallback(

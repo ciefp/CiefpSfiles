@@ -56,3 +56,41 @@ def add_viewed_item(portal_host, item_type, item_id, item_name, extra_data=None)
 def get_viewed_items(portal_host, item_type):
     data = _load_history()
     return data.get(portal_host, {}).get(item_type, [])
+
+def get_watched_episodes(portal_host, series_id):
+    """Vraća listu gledanih epizoda za datu seriju u formatu 'sezona_epizoda'."""
+    data = _load_history()
+    series_list = data.get(portal_host, {}).get("series", [])
+    for item in series_list:
+        if str(item.get("id")) == str(series_id):
+            return item.get("watched_episodes", [])
+    return []
+
+
+def mark_episode_watched(portal_host, series_id, season, episode):
+    """Označava epizodu kao gledanu."""
+    data = _load_history()
+    if portal_host not in data:
+        data[portal_host] = {}
+    if "series" not in data[portal_host]:
+        data[portal_host]["series"] = []
+
+    found = False
+    for item in data[portal_host]["series"]:
+        if str(item.get("id")) == str(series_id):
+            found = True
+            if "watched_episodes" not in item:
+                item["watched_episodes"] = []
+            key = f"{season}_{episode}"
+            if key not in item["watched_episodes"]:
+                item["watched_episodes"].append(key)
+            break
+
+    if not found:
+        data[portal_host]["series"].append({
+            "id": str(series_id),
+            "name": "",
+            "watched_episodes": [f"{season}_{episode}"]
+        })
+
+    _save_history(data)
