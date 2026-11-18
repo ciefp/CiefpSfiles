@@ -31,6 +31,7 @@ def _save_history(data):
     except Exception as e:
         print("[RecentlyViewed] Save error:", e)
 
+
 def add_viewed_item(portal_host, item_type, item_id, item_name, extra_data=None):
     if not portal_host or not item_id:
         return
@@ -39,9 +40,20 @@ def add_viewed_item(portal_host, item_type, item_id, item_name, extra_data=None)
         data[portal_host] = {}
     if item_type not in data[portal_host]:
         data[portal_host][item_type] = []
+
+    # Pronađi postojeći unos (ako postoji) da sačuvamo watched_episodes
+    existing_entry = None
+    for x in data[portal_host][item_type]:
+        if str(x.get("id")) == str(item_id):
+            existing_entry = x
+            break
+
+    # Ukloni postojeći unos
     data[portal_host][item_type] = [
         x for x in data[portal_host][item_type] if str(x.get("id")) != str(item_id)
     ]
+
+    # Napravi novi unos
     entry = {
         "id": str(item_id),
         "name": item_name,
@@ -49,9 +61,15 @@ def add_viewed_item(portal_host, item_type, item_id, item_name, extra_data=None)
     }
     if extra_data:
         entry.update(extra_data)
+
+    # Ako je postojao stari unos sa watched_episodes, sačuvaj ih
+    if existing_entry and "watched_episodes" in existing_entry:
+        entry["watched_episodes"] = existing_entry["watched_episodes"]
+
     data[portal_host][item_type].insert(0, entry)
     data[portal_host][item_type] = data[portal_host][item_type][:50]
     _save_history(data)
+
 
 def get_viewed_items(portal_host, item_type):
     data = _load_history()
