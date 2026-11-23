@@ -112,3 +112,17 @@ def mark_episode_watched(portal_host, series_id, season, episode):
         })
 
     _save_history(data)
+
+def remove_viewed_item(portal_host, item_type, item_id):
+    """Uklanja stavku iz istorije/watched liste."""
+    if not portal_host or not item_id:
+        return
+    data = _load_history()
+    if portal_host in data and item_type in data[portal_host]:
+        original_len = len(data[portal_host][item_type])
+        data[portal_host][item_type] = [
+            x for x in data[portal_host][item_type]
+            if str(x.get("id")) != str(item_id)
+        ]
+        if len(data[portal_host][item_type]) < original_len:
+            _save_history(data)

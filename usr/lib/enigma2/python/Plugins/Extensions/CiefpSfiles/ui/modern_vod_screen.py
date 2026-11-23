@@ -13,11 +13,13 @@ from Screens.Screen import Screen
 from Screens.InfoBar import MoviePlayer
 from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
+from Screens.ChoiceBox import ChoiceBox
 from enigma import eTimer, eServiceReference, eLabel, ePoint, loadPNG
 from Tools.LoadPixmap import LoadPixmap
 
 from .modern_vod_details import ModernVODDetailsScreen
 from ..core.stalker_api import StalkerAPI
+from ..core.recently_viewed import add_viewed_item, get_viewed_items, remove_viewed_item
 from ..core.metadata import fetch_metadata_async, fetch_omdb_rating_async, translate_text_async
 from ..core.config import config
 from ..core.paths import POSTERS_CACHE_DIR
@@ -117,7 +119,7 @@ class ModernVODScreen(Screen):
                     foregroundColor="white" backgroundColor="#800000" halign="center" valign="center" zPosition="4"/>
             
             <ePixmap pixmap="buttons/green.png" position="240,1020" size="35,35" alphatest="blend" zPosition="4"/>
-            <eLabel text="PLAY" position="290,1015" size="180,45" font="Bold;28"
+            <eLabel text="WATCHLIST" position="290,1015" size="180,45" font="Bold;28"
                     foregroundColor="white" backgroundColor="#008000" halign="center" valign="center" zPosition="4"/>
             
             <ePixmap pixmap="buttons/yellow.png" position="480,1020" size="35,35" alphatest="blend" zPosition="4"/>
@@ -178,7 +180,7 @@ class ModernVODScreen(Screen):
             {
                 "cancel": self.close,
                 "red": self.close,
-                "green": self.play_selected,
+                "green": self.on_green_button,
                 "yellow": self.prev_page,
                 "blue": self.next_page,
                 "ok": self.play_selected,
@@ -599,6 +601,55 @@ class ModernVODScreen(Screen):
 
     def on_down(self):
         pass
+
+    def on_green_button(self):
+        start_idx = self.current_page * self.items_per_page
+        stream_idx = start_idx + self.selected_index
+
+        if stream_idx >= len(self.streams):
+            return
+
+        stream = self.streams[stream_idx]
+        stream_id = stream.get("stream_id")
+        title = clean_title(stream.get("name", "Unknown"))
+
+        # Proveravamo da li je već na listi
+        recent_items = get_viewed_items(self.portal.get("host", ""), "vod")
+        is_in_list = any(str(x.get("id")) == str(stream_id) for x in recent_items)
+
+        options = []
+        if not is_in_list:
+            options.append(("Add to Watchlist", "add"))
+        else:
+            options.append(("Remove from Watchlist", "remove"))
+
+        def on_choice(choice):
+            if not choice:
+                return
+            action = choice[1]
+
+            if action == "add":
+                add_viewed_item(
+                    portal_host=self.portal.get("host", ""),
+                    item_type="vod",
+                    item_id=stream_id,
+                    item_name=title
+                )
+                self["status"].setText(f"Added to Watchlist: {title}")
+            elif action == "remove":
+                remove_viewed_item(self.portal.get("host", ""), "vod", stream_id)
+                self["status"].setText(f"Removed from Watchlist: {title}")
+
+                # Ako trenutno gledamo RECENT_VOD, osvežavamo listu
+                if self.category_id == "RECENT_VOD":
+                    self.load_streams()
+
+        self.session.openWithCallback(
+            on_choice,
+            ChoiceBox,
+            title=f"Watchlist: {title}",
+            list=options
+        )
 
     def next_page(self):
         total_pages = (len(self.streams) + self.items_per_page - 1) // self.items_per_page

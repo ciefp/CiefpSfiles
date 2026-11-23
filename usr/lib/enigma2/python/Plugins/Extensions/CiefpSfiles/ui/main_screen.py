@@ -12,15 +12,15 @@ from Components.MenuList import MenuList
 from Components.Pixmap import Pixmap
 from Components.MultiContent import MultiContentEntryText, MultiContentEntryPixmapAlphaTest
 from Screens.Screen import Screen
+from Screens.ChoiceBox import ChoiceBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Screens.MessageBox import MessageBox
 from Screens.InfoBar import MoviePlayer
 from enigma import eListboxPythonMultiContent, gFont, loadPNG, RT_HALIGN_LEFT, RT_VALIGN_CENTER
 from enigma import eTimer, eServiceReference
-
 from Tools.LoadPixmap import LoadPixmap
 
-from ..core.recently_viewed import add_viewed_item, get_viewed_items
+from ..core.recently_viewed import add_viewed_item, get_viewed_items, remove_viewed_item
 from ..core.stalker_api import StalkerAPI
 from ..core.metadata import fetch_metadata_async, fetch_omdb_rating_async, translate_text_async
 from .settings_screen import SettingsScreen
@@ -102,7 +102,7 @@ class MainScreen(Screen):
                     foregroundColor="white" backgroundColor="#800000" halign="center" valign="center"/>
             
             <ePixmap pixmap="buttons/green.png" position="240,1005" size="35,35" alphatest="blend"/>
-            <eLabel text="LIVE" position="290,1000" size="180,45" font="Bold;28"
+            <eLabel text="WATCHLIST" position="290,1000" size="180,45" font="Bold;28"
                     foregroundColor="white" backgroundColor="#008000" halign="center" valign="center"/>
             
             <ePixmap pixmap="buttons/yellow.png" position="480,1005" size="35,35" alphatest="blend"/>
@@ -147,7 +147,8 @@ class MainScreen(Screen):
         self.player_type_vod = config.plugins.ciefpsfiles.player_type_vod.value
 
         # Widgets
-        self["title"] = Label(f"..:: CiefpSfiles - {portal.get('name', '')} ::..")
+        # Prikazujemo samo naziv plugina, bez hosta i MAC adrese
+        self["title"] = Label("..:: CiefpSfiles ::..")
         
         # Koristimo MenuList sa podrškom za sličice
         self["left_list"] = MenuList([], enableWrapAround=True, content=eListboxPythonMultiContent)
@@ -175,7 +176,7 @@ class MainScreen(Screen):
             {
                 "cancel": self.close,
                 "red": self.close,
-                "green": self.open_live_screen,
+                "green": self.on_green_button,
                 "yellow": self.open_movies_groups,
                 "blue": self.open_series_groups,
                 "ok": self.on_ok,
@@ -280,22 +281,23 @@ class MainScreen(Screen):
             items.append([("SERIES", ""), MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                                                 flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                                                 text="> Series")])
-        # --- RECENTLY VIEWED ---
-        icon_recent = _get_icon_path("history.png")  # Ili icon_folder.png
-        if os.path.exists(icon_recent):
+
+        # --- WATCHLIST (Objedinjeno sa Recently Viewed) ---
+        icon_watch = _get_icon_path("history.png")
+        if os.path.exists(icon_watch):
             items.append([
-                ("RECENTLY_VIEWED", ""),
-                MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon_recent)),
+                ("WATCHLIST", ""),
+                MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon_watch)),
                 MultiContentEntryText(pos=(50, 0), size=(650, 50), font=0,
                                       flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                      text="> Recently Viewed")
+                                      text="> Watchlist")
             ])
         else:
             items.append([
-                ("RECENTLY_VIEWED", ""),
+                ("WATCHLIST", ""),
                 MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                       flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                      text="> Recently Viewed")
+                                      text="> Watchlist")
             ])
 
         items.append([("", ""),
@@ -396,8 +398,92 @@ class MainScreen(Screen):
         except Exception:
             pass
 
+    def on_green_button(self):
+        idx = self["left_list"].getSelectedIndex()
+
+        # Na Home ekranu otvaramo Recently Viewed / Watchlist
+        if self.current_view == "HOME":
+            self.open_recently_viewed()
+            return
+
+        # Ako smo u listi filmova ili serija
+        if self.current_category is not None and idx > 0:
+            if self.current_view == "VOD" and not self.current_series:
+                if (idx - 1) < len(self.streams):
+                    s = self.streams[idx - 1]
+                    self._show_watchlist_choice("vod", s.get("stream_id"), s.get("name", "Unknown"))
+            elif self.current_view == "SERIES" and not self.current_series:
+                if (idx - 1) < len(self.streams):
+                    s = self.streams[idx - 1]
+                    self._show_watchlist_choice("series", s.get("series_id"), s.get("name", "Unknown"))
+            return
+
+        self["status"].setText("Watchlist: Select a Movie or Series first.")
+
+    def _show_watchlist_choice(self, item_type, item_id, item_name):
+        # Proveravamo da li je već na listi
+        recent_items = get_viewed_items(self.portal.get("host", ""), item_type)
+        is_in_list = any(str(x.get("id")) == str(item_id) for x in recent_items)
+
+        options = []
+        if not is_in_list:
+            options.append(("Add to Watchlist", "add"))
+        else:
+            options.append(("Remove from Watchlist", "remove"))
+            options.append(("Add again (Update)", "add"))  # Za slučaj da želi da osveži datum
+
+        def on_choice(choice):
+            if not choice:
+                return
+            action = choice[1]
+
+            if action == "add":
+                add_viewed_item(
+                    portal_host=self.portal.get("host", ""),
+                    item_type=item_type,
+                    item_id=item_id,
+                    item_name=item_name
+                )
+                self["status"].setText(f"Added to Watchlist: {item_name}")
+            elif action == "remove":
+                remove_viewed_item(self.portal.get("host", ""), item_type, item_id)
+                self["status"].setText(f"Removed from Watchlist: {item_name}")
+                # Ako trenutno gledamo listu, osvežavamo je da nestane stavka
+                if self.current_category == "RECENT_VOD" or self.current_category == "RECENT_SERIES":
+                    self._load_streams_for_category()
+
+        self.session.openWithCallback(
+            on_choice,
+            ChoiceBox,
+            title=f"Watchlist: {item_name}",
+            list=options
+        )
+
     def _update_info(self):
         idx = self["left_list"].getSelectedIndex()
+        # --- DODATO: Ažuriranje glavnog naslova u zavisnosti od konteksta ---
+        if self.current_view == "HOME":
+            self["title"].setText("..:: CiefpSfiles ::..")
+        elif self.current_category is None:
+            # Ako smo u listi kategorija
+            if 0 < idx <= len(self.categories):
+                cat_name = self.categories[idx - 1].get('category_name', '')
+                self["title"].setText(f"..:: CiefpSfiles - {cat_name} ::..")
+            else:
+                self["title"].setText("..:: CiefpSfiles - Categories ::..")
+        elif self.current_category is not None and not self.current_series:
+            # Ako smo u listi filmova/serija, prikaži ime kategorije
+            # Pronađi ime kategorije iz self.categories
+            cat_name = ""
+            for cat in self.categories:
+                if str(cat.get("category_id")) == str(self.current_category):
+                    cat_name = cat.get("category_name", "")
+                    break
+            if cat_name:
+                self["title"].setText(f"..:: CiefpSfiles - {cat_name} ::..")
+            else:
+                self["title"].setText("..:: CiefpSfiles ::..")
+        # -----------------------------------------------------------------
 
         if self.current_view == "HOME":
             self._clear_info_panel()
@@ -745,22 +831,37 @@ class MainScreen(Screen):
         for s in self.streams:
             if not isinstance(s, dict):
                 continue
-            name = clean_title(s.get("name", "Unknown"))
+            raw_name = s.get("name", "Unknown")
+            name = clean_title(raw_name)
+
+            # Pokušavamo da izvučemo godinu iz originalnog naziva ili iz polja 'year'
+            # Često Stalker API vraća godinu u nazivu, npr. "The Black Hole (1979)"
+            year = s.get("year", "")
+            if not year:
+                import re
+                # Tražimo 4 cifre u zagradi na kraju ili bilo gde u nazivu
+                match = re.search(r'\((\d{4})\)', raw_name)
+                if match:
+                    year = match.group(1)
+
+            # Ako godina postoji, dodajemo je u prikazni naziv
+            display_name = f"{name} ({year})" if year else name
+
             sid = s.get("stream_id") if "stream_id" in s else s.get("series_id")
             if icon_exists:
                 items.append([
-                    (name, sid),
+                    (display_name, sid),
                     MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
                     MultiContentEntryText(pos=(50, 0), size=(600, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                          text=name)
+                                          text=display_name)
                 ])
             else:
                 items.append([
-                    (name, sid),
+                    (display_name, sid),
                     MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                          text=name)
+                                          text=display_name)
                 ])
 
         self["left_list"].setList(items)
@@ -1095,22 +1196,34 @@ class MainScreen(Screen):
             icon = _get_icon_path("icon_film.png")
 
         for s in self.streams:
-            name = s.get("name", "Unknown")
+            raw_name = s.get("name", "Unknown")
+            name = clean_title(raw_name)
+
+            year = s.get("year", "")
+            if not year:
+                import re
+                match = re.search(r'\((\d{4})\)', raw_name)
+                if match:
+                    year = match.group(1)
+
+            display_name = f"{name} ({year})" if year else name
+
             if os.path.exists(icon):
                 items.append([
-                    (name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
+                    (display_name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
                     MultiContentEntryPixmapAlphaTest(pos=(10, 10), size=(30, 30), png=loadPNG(icon)),
                     MultiContentEntryText(pos=(50, 0), size=(600, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                          text=name)
+                                          text=display_name)
                 ])
             else:
                 items.append([
-                    (name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
+                    (display_name, s.get("stream_id") if "stream_id" in s else s.get("series_id")),
                     MultiContentEntryText(pos=(0, 0), size=(650, 50), font=0,
                                           flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
-                                          text=name)
+                                          text=display_name)
                 ])
+
 
         self["left_list"].setList(items)
         self["left_list"].moveToIndex(0)
